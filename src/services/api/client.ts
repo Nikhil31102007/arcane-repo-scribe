@@ -1,7 +1,10 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
 
+// When VITE_API_URL is not set we use "/api" so requests go through the
+// Vite dev-server proxy (vite.config.ts: /api → http://localhost:3000).
+// This avoids CORS entirely in development.
 const BASE_URL =
-  import.meta.env.VITE_API_URL ?? "https://nit-delhi-hackathon-aywc.onrender.com";
+  import.meta.env.VITE_API_URL ?? "/api";
 
 type TokenGetter = () => string | null;
 type RefreshHandler = () => Promise<string | null>;
@@ -23,13 +26,22 @@ export function configureApiClient(opts: {
 
 export const api: AxiosInstance = axios.create({
   baseURL: BASE_URL,
-  headers: { "Content-Type": "application/json" },
+  withCredentials: false, // must be false when backend uses wildcard CORS origin
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  },
 });
+
+console.log("[API] baseURL:", BASE_URL);
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = getAccessToken();
+  console.log("[API] →", config.method?.toUpperCase(), config.baseURL + config.url, { hasToken: !!token });
   if (token) {
-    config.headers.set("Authorization", `Bearer ${token}`);
+    config.headers.Authorization = `Bearer ${token}`;
+    config.headers["x-access-token"] = token;
+    config.headers["access-token"] = token;
   }
   return config;
 });
@@ -56,7 +68,9 @@ api.interceptors.response.use(
         }
         const newToken = await refreshPromise;
         if (newToken) {
-          original.headers.set("Authorization", `Bearer ${newToken}`);
+          original.headers.Authorization = `Bearer ${newToken}`;
+          original.headers["x-access-token"] = newToken;
+          original.headers["access-token"] = newToken;
           return api.request(original);
         }
       } catch {
@@ -71,7 +85,7 @@ api.interceptors.response.use(
 export function extractError(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const data = err.response?.data as
-      | { error?: string; message?: string }
+      | { error?: string; message?: string; status?: string }
       | undefined;
     return data?.error ?? data?.message ?? err.message;
   }

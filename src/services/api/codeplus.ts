@@ -16,39 +16,88 @@ export interface AnalysisResult {
 }
 
 export interface Analysis {
-  id: number;
+  id: number | string;
   status: AnalysisStatus;
   repoLink?: string;
+  repo_link?: string;
   userType?: string;
   result?: AnalysisResult;
   prUrl?: string;
+  pr_url?: string;
   pullRequestUrl?: string;
+  pull_request_url?: string;
   error?: string;
   message?: string;
   [k: string]: unknown;
 }
 
-interface Envelope<T> {
-  status: string;
-  message?: string;
-  data: T;
+export interface ApplyResponse {
+  id?: number | string;
+  status?: AnalysisStatus;
+  prUrl?: string;
+  pr_url?: string;
+  pullRequestUrl?: string;
+  pull_request_url?: string;
+  [k: string]: unknown;
 }
 
+/** Normalise any envelope shape the backend might return */
 function unwrap<T>(payload: unknown): T {
-  // Backend may return { data: ... } envelope or raw object
-  if (payload && typeof payload === "object" && "data" in (payload as object)) {
-    const env = payload as Envelope<T>;
-    if (env.data !== undefined) return env.data;
+  if (payload == null) return payload as T;
+  if (typeof payload !== "object") return payload as T;
+
+  const obj = payload as Record<string, unknown>;
+
+  // Detect error envelopes: { status: "error" | "fail", message: "..." }
+  if (
+    (obj.status === "error" || obj.status === "fail") &&
+    !("id" in obj) &&
+    !("data" in obj)
+  ) {
+    throw new Error(
+      typeof obj.message === "string"
+        ? obj.message
+        : typeof obj.error === "string"
+          ? obj.error
+          : "Backend returned an error",
+    );
+  }
+
+  // { status, data: { ... } }
+  if ("data" in obj && obj.data !== undefined && obj.data !== null) {
+    return obj.data as T;
+  }
+  // { status, result: { ... } }
+  if ("result" in obj && obj.result !== undefined && obj.result !== null) {
+    return obj.result as T;
   }
   return payload as T;
 }
 
-export async function startAnalysis(
-  repoLink: string,
-  userType: string,
-): Promise<Analysis> {
+/** Pull the PR url from whichever field the server used */
+export function extractPrUrl(obj: Analysis | ApplyResponse): string | undefined {
+  return (
+    obj.prUrl ??
+    obj.pr_url ??
+    obj.pullRequestUrl ??
+    obj.pull_request_url ??
+    undefined
+  );
+}
+
+/** Pull repoLink from whichever field the server used */
+export function extractRepoLink(obj: Analysis): string | undefined {
+  return obj.repoLink ?? obj.repo_link ?? undefined;
+}
+
+export async function startAnalysis(repoLink: string, userType: string): Promise<Analysis> {
   const { data } = await api.post("/analyze", { repoLink, userType });
-  return unwrap<Analysis>(data);
+  const analysis = unwrap<Analysis>(data);
+  // Ensure we have an id
+  if (!analysis?.id) {
+    throw new Error("Backend did not return an analysis id");
+  }
+  return analysis;
 }
 
 export async function getAnalysis(id: number | string): Promise<Analysis> {
@@ -56,19 +105,11 @@ export async function getAnalysis(id: number | string): Promise<Analysis> {
   return unwrap<Analysis>(data);
 }
 
-export interface ApplyResponse {
-  id?: number;
-  status?: AnalysisStatus;
-  prUrl?: string;
-  pullRequestUrl?: string;
-  [k: string]: unknown;
-}
-
 export async function applySelections(
-  analysisId: number,
+  analysisId: number | string,
   files: string[],
   deps: string[],
 ): Promise<ApplyResponse> {
-  const { data } = await api.post("/apply", { analysisId, files, deps });
+  const { data } = await api.post(`/analyze/${analysisId}/apply`, { files, deps });
   return unwrap<ApplyResponse>(data);
 }

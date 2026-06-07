@@ -6,4 +6,18 @@
 // You can pass additional config via defineConfig({ vite: { ... } }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-export default defineConfig();
+export default defineConfig({
+  vite: {
+    server: {
+      proxy: {
+        // All requests to /api/* are forwarded to localhost:3000
+        // e.g. /api/auth/login → http://localhost:3000/auth/login
+        "/api": {
+          target: "http://localhost:3000",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, ""),
+        },
+      },
+    },
+  },
+});
